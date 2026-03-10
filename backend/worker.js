@@ -1,15 +1,11 @@
 const DEFAULT_STEP_SECONDS = 60;
 const DEFAULT_TOKEN_LENGTH = 20;
 const DEFAULT_SKEW = 0;
-const GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs";
-const GOOGLE_ISSUERS = new Set([
-  "https://accounts.google.com",
-  "accounts.google.com"
-]);
+const DEFAULT_SESSION_TTL = 600;
 
-let cachedJwks = null;
-let cachedJwksAt = 0;
-const JWKS_TTL_MS = 60 * 60 * 1000;
+const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
+const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
+const GITHUB_API_BASE = "https://api.github.com";
 
 export default {
   async fetch(request, env) {
@@ -24,17 +20,152 @@ export default {
       return textResponse("OK", 200, corsHeaders);
     }
 
+    if (url.pathname === "/oauth/start") {
+      return handleOAuthStart(request, env);
+    }
+
+    if (url.pathname === "/oauth/callback") {
+      return handleOAuthCallback(request, env);
+    }
+
     if (url.pathname === "/token") {
       return handleTokenRequest(request, env, corsHeaders);
     }
 
-    if (url.pathname !== "/script") {
-      return textResponse("NOT_FOUND", 404, corsHeaders);
+    if (url.pathname === "/script") {
+      return handleScriptRequest(url, env, corsHeaders);
     }
 
-    return handleScriptRequest(url, env, corsHeaders);
+    return textResponse("NOT_FOUND", 404, corsHeaders);
   }
 };
+
+async function handleOAuthStart(request, env) {
+  if (!env.GITHUB_CLIENT_ID || !env.SESSION_SECRET) {
+    return textResponse("SERVER_MISSING_GITHUB_CONFIG", 500);
+  }
+
+  const url = new URL(request.url);
+  const redirectUri = env.GITHUB_REDIRECT_URI || new URL("/oauth/callback", url.origin).toString();
+  const state = await makeState(env.SESSION_SECRET);
+
+  const params = new URLSearchParams({
+    client_id: env.GITHUB_CLIENT_ID,
+    redirect_uri: redirectUri,
+    state,
+    scope: "read:org read:user",
+    allow_signup: "false"
+  });
+
+  return Response.redirect(`${GITHUB_AUTHORIZE_URL}?${params.toString()}`, 302);
+}
+
+async function handleOAuthCallback(request, env) {
+  if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET || !env.SESSION_SECRET) {
+    return textResponse("SERVER_MISSING_GITHUB_CONFIG", 500);
+  }
+
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+
+  if (!code || !state) {
+    return textResponse("OAUTH_MISSING_CODE", 400);
+  }
+
+  const stateOk = await verifyState(state, env.SESSION_SECRET);
+  if (!stateOk) {
+    return textResponse("OAUTH_BAD_STATE", 400);
+  }
+
+  const redirectUri = env.GITHUB_REDIRECT_URI || new URL("/oauth/callback", url.origin).toString();
+
+  const tokenResponse = await fetch(GITHUB_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      client_id: env.GITHUB_CLIENT_ID,
+      client_secret: env.GITHUB_CLIENT_SECRET,
+      code,
+      redirect_uri: redirectUri
+    })
+  });
+
+  if (!tokenResponse.ok) {
+    return textResponse("OAUTH_TOKEN_FAILED", 502);
+  }
+
+  const tokenData = await tokenResponse.json();
+  const accessToken = tokenData.access_token;
+  if (!accessToken) {
+    return textResponse("OAUTH_TOKEN_MISSING", 502);
+  }
+
+  const user = await fetchGitHubUser(accessToken);
+  if (!user) {
+    return textResponse("OAUTH_USER_FAILED", 502);
+  }
+
+  const org = env.ORG_NAME || "Stormed-Studio";
+  const membership = await fetchOrgMembership(accessToken, org);
+  if (!membership || membership.state !== "active") {
+    return textResponse("UNAUTHORIZED", 403);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const ttl = toInt(env.SESSION_TTL, DEFAULT_SESSION_TTL);
+  const session = await signSession(env.SESSION_SECRET, {
+    sub: user.id,
+    login: user.login,
+    org,
+    iat: now,
+    exp: now + ttl
+  });
+
+  const frontendUrl = resolveFrontendUrl(env);
+  if (!frontendUrl) {
+    return textResponse("SERVER_MISSING_FRONTEND_URL", 500);
+  }
+
+  const redirectUrl = `${frontendUrl}#session=${encodeURIComponent(session)}`;
+  return Response.redirect(redirectUrl, 302);
+}
+
+async function handleTokenRequest(request, env, corsHeaders) {
+  if (!env.SESSION_SECRET || !env.TOKEN_SECRET) {
+    return textResponse("SERVER_MISSING_SECRET", 500, corsHeaders);
+  }
+
+  const session = extractSession(request);
+  if (!session) {
+    return textResponse("NO_SESSION", 401, corsHeaders);
+  }
+
+  const payload = await verifySession(session, env.SESSION_SECRET);
+  if (!payload) {
+    return textResponse("BAD_SESSION", 403, corsHeaders);
+  }
+
+  const stepSeconds = toInt(env.STEP_SECONDS, DEFAULT_STEP_SECONDS);
+  const tokenLength = toInt(env.TOKEN_LENGTH, DEFAULT_TOKEN_LENGTH);
+  const token = await currentToken(env.TOKEN_SECRET, stepSeconds, tokenLength);
+
+  const now = Math.floor(Date.now() / 1000);
+  const expiresIn = stepSeconds - (now % stepSeconds);
+
+  return jsonResponse(
+    {
+      token,
+      expires_in: expiresIn,
+      login: payload.login || ""
+    },
+    200,
+    corsHeaders
+  );
+}
 
 async function handleScriptRequest(url, env, corsHeaders) {
   if (!env.TOKEN_SECRET) {
@@ -73,49 +204,6 @@ async function handleScriptRequest(url, env, corsHeaders) {
   });
 }
 
-async function handleTokenRequest(request, env, corsHeaders) {
-  if (!env.TOKEN_SECRET) {
-    return textResponse("SERVER_MISSING_SECRET", 500, corsHeaders);
-  }
-
-  if (!env.GOOGLE_CLIENT_ID) {
-    return textResponse("SERVER_MISSING_GOOGLE_CONFIG", 500, corsHeaders);
-  }
-
-  if (!env.ALLOWED_EMAILS && !env.ALLOWED_EMAIL_HASHES) {
-    return textResponse("SERVER_MISSING_ALLOWED_EMAILS", 500, corsHeaders);
-  }
-
-  if (env.ALLOWED_EMAIL_HASHES && !env.EMAIL_HASH_SECRET) {
-    return textResponse("SERVER_MISSING_EMAIL_HASH_SECRET", 500, corsHeaders);
-  }
-
-  const authHeader = request.headers.get("authorization") || "";
-  const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-  if (!idToken) {
-    return textResponse("NO_AUTH", 401, corsHeaders);
-  }
-
-  const email = await verifyGoogleIdToken(idToken, env.GOOGLE_CLIENT_ID);
-  if (!email) {
-    return textResponse("UNAUTHORIZED", 403, corsHeaders);
-  }
-
-  const allowed = await isEmailAllowed(email, env);
-  if (!allowed) {
-    return textResponse("UNAUTHORIZED", 403, corsHeaders);
-  }
-
-  const stepSeconds = toInt(env.STEP_SECONDS, DEFAULT_STEP_SECONDS);
-  const tokenLength = toInt(env.TOKEN_LENGTH, DEFAULT_TOKEN_LENGTH);
-  const token = await currentToken(env.TOKEN_SECRET, stepSeconds, tokenLength);
-
-  const now = Math.floor(Date.now() / 1000);
-  const expiresIn = stepSeconds - (now % stepSeconds);
-
-  return jsonResponse({ token, expires_in: expiresIn }, 200, corsHeaders);
-}
-
 function buildCorsHeaders(accessOrigin) {
   const origin = accessOrigin || "*";
   return {
@@ -150,6 +238,25 @@ function jsonResponse(body, status, extraHeaders) {
 function toInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function resolveFrontendUrl(env) {
+  if (env.FRONTEND_TOKEN_URL) {
+    return env.FRONTEND_TOKEN_URL;
+  }
+  if (env.FRONTEND_URL) {
+    return new URL("token.html", env.FRONTEND_URL).toString();
+  }
+  return "";
+}
+
+function extractSession(request) {
+  const authHeader = request.headers.get("authorization") || "";
+  if (authHeader.startsWith("Bearer ")) {
+    return authHeader.slice(7).trim();
+  }
+  const url = new URL(request.url);
+  return url.searchParams.get("session") || "";
 }
 
 async function verifyToken(input, secret, stepSeconds, length, skew) {
@@ -230,86 +337,95 @@ function timingSafeEqual(a, b) {
   return diff === 0;
 }
 
-async function verifyGoogleIdToken(idToken, clientId) {
-  const parts = idToken.split(".");
-  if (parts.length !== 3) {
+async function fetchGitHubUser(accessToken) {
+  const response = await fetch(`${GITHUB_API_BASE}/user`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      accept: "application/vnd.github+json",
+      "user-agent": "stormed-hub"
+    }
+  });
+
+  if (!response.ok) {
     return null;
   }
 
-  const header = decodeJwtSection(parts[0]);
-  const payload = decodeJwtSection(parts[1]);
-
-  if (!header || !payload) {
-    return null;
-  }
-
-  if (header.alg !== "RS256" || !header.kid) {
-    return null;
-  }
-
-  if (!GOOGLE_ISSUERS.has(payload.iss)) {
-    return null;
-  }
-
-  if (payload.aud !== clientId) {
-    return null;
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  if (!payload.exp || payload.exp <= now) {
-    return null;
-  }
-
-  if (!payload.email || payload.email_verified !== true) {
-    return null;
-  }
-
-  const key = await getGoogleKey(header.kid);
-  if (!key) {
-    return null;
-  }
-
-  const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
-  const signature = base64UrlToBytes(parts[2]);
-
-  const verified = await crypto.subtle.verify(
-    "RSASSA-PKCS1-v1_5",
-    key,
-    signature,
-    data
-  );
-
-  if (!verified) {
-    return null;
-  }
-
-  return String(payload.email).toLowerCase();
+  return response.json();
 }
 
-async function isEmailAllowed(email, env) {
-  const normalized = email.trim().toLowerCase();
-
-  if (env.ALLOWED_EMAIL_HASHES) {
-    const hashes = env.ALLOWED_EMAIL_HASHES.split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
-
-    if (!hashes.length || !env.EMAIL_HASH_SECRET) {
-      return false;
+async function fetchOrgMembership(accessToken, org) {
+  const response = await fetch(
+    `${GITHUB_API_BASE}/user/memberships/orgs/${encodeURIComponent(org)}`,
+    {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        accept: "application/vnd.github+json",
+        "user-agent": "stormed-hub"
+      }
     }
+  );
 
-    const digest = await hmacBase64Url(env.EMAIL_HASH_SECRET, normalized);
-    return hashes.includes(digest);
+  if (!response.ok) {
+    return null;
   }
 
-  if (env.ALLOWED_EMAILS) {
-    const allowed = env.ALLOWED_EMAILS.split(",")
-      .map((value) => value.trim().toLowerCase())
-      .filter(Boolean);
-    return allowed.includes(normalized);
-  }
+  return response.json();
+}
 
-  return false;
+async function makeState(secret) {
+  const nonce = new Uint8Array(16);
+  crypto.getRandomValues(nonce);
+  const issued = Math.floor(Date.now() / 1000);
+  const payload = `${issued}.${base64UrlFromBytes(nonce)}`;
+  const sig = await hmacBase64Url(secret, payload);
+  return `${payload}.${sig}`;
+}
+
+async function verifyState(state, secret) {
+  const parts = state.split(".");
+  if (parts.length !== 3) {
+    return false;
+  }
+  const issued = Number.parseInt(parts[0], 10);
+  if (!Number.isFinite(issued)) {
+    return false;
+  }
+  const payload = `${parts[0]}.${parts[1]}`;
+  const sig = parts[2];
+  const expected = await hmacBase64Url(secret, payload);
+  if (!timingSafeEqual(sig, expected)) {
+    return false;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  return now - issued <= 300;
+}
+
+async function signSession(secret, payload) {
+  const body = base64UrlFromBytes(new TextEncoder().encode(JSON.stringify(payload)));
+  const sig = await hmacBase64Url(secret, body);
+  return `${body}.${sig}`;
+}
+
+async function verifySession(session, secret) {
+  const parts = session.split(".");
+  if (parts.length !== 2) {
+    return null;
+  }
+  const [body, sig] = parts;
+  const expected = await hmacBase64Url(secret, body);
+  if (!timingSafeEqual(sig, expected)) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(base64UrlToBytes(body)));
+    const now = Math.floor(Date.now() / 1000);
+    if (!payload.exp || payload.exp <= now) {
+      return null;
+    }
+    return payload;
+  } catch (error) {
+    return null;
+  }
 }
 
 async function hmacBase64Url(secret, message) {
@@ -326,60 +442,6 @@ async function hmacBase64Url(secret, message) {
     new TextEncoder().encode(message)
   );
   return base64UrlFromBytes(new Uint8Array(sig));
-}
-
-async function getGoogleKey(kid) {
-  const jwks = await getGoogleJwks();
-  let jwk = jwks.find((key) => key.kid === kid);
-
-  if (!jwk) {
-    cachedJwks = null;
-    cachedJwksAt = 0;
-    const fresh = await getGoogleJwks();
-    jwk = fresh.find((key) => key.kid === kid);
-  }
-
-  if (!jwk) {
-    return null;
-  }
-
-  return crypto.subtle.importKey(
-    "jwk",
-    jwk,
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false,
-    ["verify"]
-  );
-}
-
-async function getGoogleJwks() {
-  const now = Date.now();
-  if (cachedJwks && now - cachedJwksAt < JWKS_TTL_MS) {
-    return cachedJwks;
-  }
-
-  const response = await fetch(GOOGLE_CERTS_URL, {
-    cf: { cacheTtl: 3600, cacheEverything: true }
-  });
-
-  if (!response.ok) {
-    return [];
-  }
-
-  const data = await response.json();
-  cachedJwks = Array.isArray(data.keys) ? data.keys : [];
-  cachedJwksAt = now;
-
-  return cachedJwks;
-}
-
-function decodeJwtSection(section) {
-  try {
-    const bytes = base64UrlToBytes(section);
-    return JSON.parse(new TextDecoder().decode(bytes));
-  } catch (error) {
-    return null;
-  }
 }
 
 function base64UrlFromBytes(bytes) {

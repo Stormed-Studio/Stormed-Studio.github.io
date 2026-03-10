@@ -1,17 +1,55 @@
 const CONFIG = {
-  clientId: "YOUR_GOOGLE_CLIENT_ID",
+  oauthStart: "https://your-worker.example/oauth/start",
   tokenEndpoint: "https://your-worker.example/token"
 };
 
-const button = document.getElementById("gsi-button");
+const loginButton = document.getElementById("login-button");
+const logoutButton = document.getElementById("logout-button");
 const tokenValue = document.getElementById("token-value");
 const tokenMeta = document.getElementById("token-meta");
+const userMeta = document.getElementById("user-meta");
 
-let idToken = "";
 let refreshTimer = null;
 
 function setMeta(text) {
   tokenMeta.textContent = text;
+}
+
+function setUser(text) {
+  userMeta.textContent = text || "";
+}
+
+function setSignedIn(state, login) {
+  loginButton.hidden = state;
+  logoutButton.hidden = !state;
+  setUser(state && login ? `Signed in as ${login}` : "");
+}
+
+function getSession() {
+  return sessionStorage.getItem("stormed_session") || "";
+}
+
+function setSession(session) {
+  sessionStorage.setItem("stormed_session", session);
+}
+
+function clearSession() {
+  sessionStorage.removeItem("stormed_session");
+}
+
+function pullSessionFromHash() {
+  if (!window.location.hash) {
+    return;
+  }
+
+  const hash = window.location.hash.slice(1);
+  const params = new URLSearchParams(hash);
+  const session = params.get("session");
+
+  if (session) {
+    setSession(session);
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
 }
 
 function scheduleRefresh(expiresIn) {
@@ -24,7 +62,9 @@ function scheduleRefresh(expiresIn) {
 }
 
 async function fetchToken() {
-  if (!idToken) {
+  const session = getSession();
+  if (!session) {
+    setSignedIn(false);
     return;
   }
 
@@ -33,11 +73,14 @@ async function fetchToken() {
   try {
     const response = await fetch(CONFIG.tokenEndpoint, {
       headers: {
-        Authorization: `Bearer ${idToken}`
+        Authorization: `Bearer ${session}`
       }
     });
 
     if (!response.ok) {
+      clearSession();
+      tokenValue.textContent = "Sign in to view";
+      setSignedIn(false);
       setMeta("Access denied.");
       return;
     }
@@ -47,46 +90,38 @@ async function fetchToken() {
 
     const expiresIn = Number(data.expires_in || 0);
     setMeta(expiresIn ? `Expires in ${expiresIn}s` : "Token ready");
+    setSignedIn(true, data.login);
     scheduleRefresh(expiresIn);
   } catch (error) {
     setMeta("Network error.");
   }
 }
 
-function handleCredentialResponse(response) {
-  idToken = response.credential;
-  fetchToken();
-}
-
-function initGoogle() {
-  if (CONFIG.clientId.includes("YOUR_")) {
-    setMeta("Set your Google Client ID in token.js");
+function handleLogin() {
+  if (CONFIG.oauthStart.includes("your-worker")) {
+    setMeta("Set your OAuth start URL in token.js");
     return;
   }
+  window.location.href = CONFIG.oauthStart;
+}
+
+function handleLogout() {
+  clearSession();
+  tokenValue.textContent = "Sign in to view";
+  setMeta("Signed out.");
+  setSignedIn(false);
+}
+
+function init() {
+  loginButton.addEventListener("click", handleLogin);
+  logoutButton.addEventListener("click", handleLogout);
 
   if (CONFIG.tokenEndpoint.includes("your-worker")) {
     setMeta("Set your token endpoint in token.js");
-    return;
   }
 
-  if (!window.google || !google.accounts || !google.accounts.id) {
-    setTimeout(initGoogle, 250);
-    return;
-  }
-
-  google.accounts.id.initialize({
-    client_id: CONFIG.clientId,
-    callback: handleCredentialResponse
-  });
-
-  google.accounts.id.renderButton(button, {
-    theme: "outline",
-    size: "large",
-    type: "standard",
-    shape: "pill"
-  });
-
-  google.accounts.id.prompt();
+  pullSessionFromHash();
+  fetchToken();
 }
 
-window.addEventListener("load", initGoogle);
+window.addEventListener("load", init);
