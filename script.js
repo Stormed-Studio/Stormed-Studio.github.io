@@ -22,11 +22,11 @@ const particles = [];
 
 const rand = (min, max) => min + Math.random() * (max - min);
 
-function makeParticle(randomY) {
+function makeParticle() {
   const life = rand(settings.minLife, settings.maxLife);
   return {
     x: rand(0, width),
-    y: randomY ? rand(0, height) : rand(-height * 0.2, 0),
+    y: rand(0, height),
     r: rand(settings.minRadius, settings.maxRadius),
     speed: rand(8, 26) * settings.speedScale,
     drift: rand(-12, 12) * settings.speedScale,
@@ -39,7 +39,7 @@ function makeParticle(randomY) {
 }
 
 function respawn(particle) {
-  const next = makeParticle(false);
+  const next = makeParticle();
   Object.assign(particle, next);
 }
 
@@ -57,7 +57,7 @@ function resize() {
 
   maxParticles = Math.max(80, Math.floor(width * height * settings.density));
   while (particles.length < maxParticles) {
-    particles.push(makeParticle(true));
+    particles.push(makeParticle());
   }
   if (particles.length > maxParticles) {
     particles.length = maxParticles;
@@ -95,7 +95,6 @@ function tick(now) {
       particle.x > width + 40
     ) {
       respawn(particle);
-      particle.y = rand(-height * 0.2, 0);
     }
 
     ctx.globalAlpha = alpha;

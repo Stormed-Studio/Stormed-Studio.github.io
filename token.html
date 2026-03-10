@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>STORMED HUB</title>
+    <title>STORMED HUB | Token Access</title>
     <link rel="icon" type="image/png" href="images/StormedGroup.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -16,7 +16,7 @@
   <body>
     <canvas id="snow" aria-hidden="true"></canvas>
 
-    <main class="page">
+    <main class="page token-page">
       <nav class="nav">
         <div class="brand">
           <img
@@ -26,33 +26,29 @@
           />
           <span>STORMED HUB</span>
         </div>
-        <div class="tag">Private Scripts</div>
+        <div class="tag">Token Access</div>
       </nav>
 
-      <section class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">Stormed Hub</p>
-          <h1>STORMED HUB</h1>
-          <p class="lead">This place is for the Stormed Hub's scripts.</p>
-          <p class="note">The access token changes every minute.</p>
-          <div class="pill"><span></span> Status: Locked</div>
-        </div>
+      <section class="panel token-panel">
+        <div class="panel-title">Authorized Accounts</div>
+        <p class="panel-copy">Sign in with Google to view the current token.</p>
 
-        <div class="panel">
-          <div class="panel-title">Access Token</div>
-          <p class="panel-copy">Changes every minute.</p>
-          <div class="panel-row">
-            <span>Rotation</span>
-            <span class="panel-value">60s</span>
-          </div>
+        <div id="gsi-button" class="gsi"></div>
+
+        <div class="token-box">
+          <div class="token-label">Current Token</div>
+          <div id="token-value" class="token-value">Sign in to view</div>
+          <div id="token-meta" class="token-meta"></div>
         </div>
       </section>
 
       <footer class="footer">
-        Stormed Hub. <a class="footer-link" href="token.html">Token Access</a>
+        Stormed Hub. <a class="footer-link" href="index.html">Back</a>
       </footer>
     </main>
 
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="token.js"></script>
     <script src="script.js"></script>
   </body>
 </html>

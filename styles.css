@@ -51,10 +51,20 @@ body {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
   font-size: 0.85rem;
   text-transform: uppercase;
   letter-spacing: 0.28em;
   color: var(--muted);
+}
+
+.brand-logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 12px rgba(125, 211, 255, 0.45));
 }
 
 .tag {
@@ -165,6 +175,59 @@ h1 {
 }
 
 .footer {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.footer-link {
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(125, 211, 255, 0.35);
+  padding-bottom: 2px;
+}
+
+.footer-link:hover {
+  color: var(--accent);
+}
+
+.token-page {
+  justify-content: center;
+  text-align: left;
+}
+
+.token-panel {
+  max-width: 560px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.gsi {
+  margin: 18px 0 24px;
+}
+
+.token-box {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.token-label {
+  font-size: 0.8rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.token-value {
+  font-family: \"JetBrains Mono\", monospace;
+  font-size: 1.3rem;
+  letter-spacing: 0.2em;
+}
+
+.token-meta {
+  margin-top: 10px;
   font-size: 0.85rem;
   color: var(--muted);
 }
