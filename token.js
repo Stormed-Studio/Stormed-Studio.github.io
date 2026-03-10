@@ -1,8 +1,11 @@
 const CONFIG = {
-  oauthStart: "https://your-worker.example/oauth/start",
+  loginEndpoint: "https://your-worker.example/auth/login",
   tokenEndpoint: "https://your-worker.example/token"
 };
 
+const form = document.getElementById("auth-form");
+const usernameInput = document.getElementById("auth-username");
+const passwordInput = document.getElementById("auth-password");
 const loginButton = document.getElementById("login-button");
 const logoutButton = document.getElementById("logout-button");
 const tokenValue = document.getElementById("token-value");
@@ -22,6 +25,8 @@ function setUser(text) {
 function setSignedIn(state, login) {
   loginButton.hidden = state;
   logoutButton.hidden = !state;
+  usernameInput.disabled = state;
+  passwordInput.disabled = state;
   setUser(state && login ? `Signed in as ${login}` : "");
 }
 
@@ -35,21 +40,6 @@ function setSession(session) {
 
 function clearSession() {
   sessionStorage.removeItem("stormed_session");
-}
-
-function pullSessionFromHash() {
-  if (!window.location.hash) {
-    return;
-  }
-
-  const hash = window.location.hash.slice(1);
-  const params = new URLSearchParams(hash);
-  const session = params.get("session");
-
-  if (session) {
-    setSession(session);
-    window.history.replaceState({}, document.title, window.location.pathname);
-  }
 }
 
 function scheduleRefresh(expiresIn) {
@@ -90,19 +80,63 @@ async function fetchToken() {
 
     const expiresIn = Number(data.expires_in || 0);
     setMeta(expiresIn ? `Expires in ${expiresIn}s` : "Token ready");
-    setSignedIn(true, data.login);
+    setSignedIn(true, data.login || usernameInput.value.trim());
     scheduleRefresh(expiresIn);
   } catch (error) {
     setMeta("Network error.");
   }
 }
 
-function handleLogin() {
-  if (CONFIG.oauthStart.includes("your-worker")) {
-    setMeta("Set your OAuth start URL in token.js");
+async function handleLogin(event) {
+  event.preventDefault();
+
+  if (CONFIG.loginEndpoint.includes("your-worker")) {
+    setMeta("Set your login endpoint in token.js");
     return;
   }
-  window.location.href = CONFIG.oauthStart;
+
+  const username = usernameInput.value.trim();
+  const password = passwordInput.value;
+
+  if (!username || !password) {
+    setMeta("Enter username and password.");
+    return;
+  }
+
+  loginButton.disabled = true;
+  setMeta("Signing in...");
+
+  try {
+    const response = await fetch(CONFIG.loginEndpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ username, password })
+    });
+
+    if (!response.ok) {
+      setMeta("Invalid credentials.");
+      loginButton.disabled = false;
+      return;
+    }
+
+    const data = await response.json();
+    if (!data.session) {
+      setMeta("Login failed.");
+      loginButton.disabled = false;
+      return;
+    }
+
+    setSession(data.session);
+    passwordInput.value = "";
+    setSignedIn(true, data.login || username);
+    loginButton.disabled = false;
+    fetchToken();
+  } catch (error) {
+    setMeta("Network error.");
+    loginButton.disabled = false;
+  }
 }
 
 function handleLogout() {
@@ -113,14 +147,13 @@ function handleLogout() {
 }
 
 function init() {
-  loginButton.addEventListener("click", handleLogin);
+  form.addEventListener("submit", handleLogin);
   logoutButton.addEventListener("click", handleLogout);
 
   if (CONFIG.tokenEndpoint.includes("your-worker")) {
     setMeta("Set your token endpoint in token.js");
   }
 
-  pullSessionFromHash();
   fetchToken();
 }
 

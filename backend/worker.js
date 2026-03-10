@@ -2,10 +2,7 @@ const DEFAULT_STEP_SECONDS = 60;
 const DEFAULT_TOKEN_LENGTH = 20;
 const DEFAULT_SKEW = 0;
 const DEFAULT_SESSION_TTL = 600;
-
-const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
-const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
-const GITHUB_API_BASE = "https://api.github.com";
+const DEFAULT_PBKDF2_ITERATIONS = 210000;
 
 export default {
   async fetch(request, env) {
@@ -20,12 +17,8 @@ export default {
       return textResponse("OK", 200, corsHeaders);
     }
 
-    if (url.pathname === "/oauth/start") {
-      return handleOAuthStart(request, env);
-    }
-
-    if (url.pathname === "/oauth/callback") {
-      return handleOAuthCallback(request, env);
+    if (url.pathname === "/auth/login") {
+      return handleLogin(request, env, corsHeaders);
     }
 
     if (url.pathname === "/token") {
@@ -40,98 +33,51 @@ export default {
   }
 };
 
-async function handleOAuthStart(request, env) {
-  if (!env.GITHUB_CLIENT_ID || !env.SESSION_SECRET) {
-    return textResponse("SERVER_MISSING_GITHUB_CONFIG", 500);
+async function handleLogin(request, env, corsHeaders) {
+  if (request.method !== "POST") {
+    return textResponse("METHOD_NOT_ALLOWED", 405, corsHeaders);
   }
 
-  const url = new URL(request.url);
-  const redirectUri = env.GITHUB_REDIRECT_URI || new URL("/oauth/callback", url.origin).toString();
-  const state = await makeState(env.SESSION_SECRET);
-
-  const params = new URLSearchParams({
-    client_id: env.GITHUB_CLIENT_ID,
-    redirect_uri: redirectUri,
-    state,
-    scope: "read:org read:user",
-    allow_signup: "false"
-  });
-
-  return Response.redirect(`${GITHUB_AUTHORIZE_URL}?${params.toString()}`, 302);
-}
-
-async function handleOAuthCallback(request, env) {
-  if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET || !env.SESSION_SECRET) {
-    return textResponse("SERVER_MISSING_GITHUB_CONFIG", 500);
+  if (!env.AUTH_USER || !env.AUTH_SALT || !env.AUTH_HASH || !env.SESSION_SECRET) {
+    return textResponse("SERVER_MISSING_AUTH", 500, corsHeaders);
   }
 
-  const url = new URL(request.url);
-  const code = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
-
-  if (!code || !state) {
-    return textResponse("OAUTH_MISSING_CODE", 400);
+  let body;
+  try {
+    body = await request.json();
+  } catch (error) {
+    return textResponse("BAD_REQUEST", 400, corsHeaders);
   }
 
-  const stateOk = await verifyState(state, env.SESSION_SECRET);
-  if (!stateOk) {
-    return textResponse("OAUTH_BAD_STATE", 400);
+  const username = String(body.username || "").trim();
+  const password = String(body.password || "");
+
+  if (!username || !password) {
+    return textResponse("BAD_REQUEST", 400, corsHeaders);
   }
 
-  const redirectUri = env.GITHUB_REDIRECT_URI || new URL("/oauth/callback", url.origin).toString();
-
-  const tokenResponse = await fetch(GITHUB_TOKEN_URL, {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      client_id: env.GITHUB_CLIENT_ID,
-      client_secret: env.GITHUB_CLIENT_SECRET,
-      code,
-      redirect_uri: redirectUri
-    })
-  });
-
-  if (!tokenResponse.ok) {
-    return textResponse("OAUTH_TOKEN_FAILED", 502);
+  if (username !== env.AUTH_USER) {
+    return textResponse("UNAUTHORIZED", 403, corsHeaders);
   }
 
-  const tokenData = await tokenResponse.json();
-  const accessToken = tokenData.access_token;
-  if (!accessToken) {
-    return textResponse("OAUTH_TOKEN_MISSING", 502);
-  }
+  const salt = base64ToBytes(env.AUTH_SALT);
+  const expected = base64ToBytes(env.AUTH_HASH);
+  const iterations = toInt(env.AUTH_ITERATIONS, DEFAULT_PBKDF2_ITERATIONS);
 
-  const user = await fetchGitHubUser(accessToken);
-  if (!user) {
-    return textResponse("OAUTH_USER_FAILED", 502);
-  }
-
-  const org = env.ORG_NAME || "Stormed-Studio";
-  const membership = await fetchOrgMembership(accessToken, org);
-  if (!membership || membership.state !== "active") {
-    return textResponse("UNAUTHORIZED", 403);
+  const derived = await derivePassword(password, salt, iterations);
+  if (!timingSafeEqualBytes(derived, expected)) {
+    return textResponse("UNAUTHORIZED", 403, corsHeaders);
   }
 
   const now = Math.floor(Date.now() / 1000);
   const ttl = toInt(env.SESSION_TTL, DEFAULT_SESSION_TTL);
   const session = await signSession(env.SESSION_SECRET, {
-    sub: user.id,
-    login: user.login,
-    org,
+    login: username,
     iat: now,
     exp: now + ttl
   });
 
-  const frontendUrl = resolveFrontendUrl(env);
-  if (!frontendUrl) {
-    return textResponse("SERVER_MISSING_FRONTEND_URL", 500);
-  }
-
-  const redirectUrl = `${frontendUrl}#session=${encodeURIComponent(session)}`;
-  return Response.redirect(redirectUrl, 302);
+  return jsonResponse({ session, login: username }, 200, corsHeaders);
 }
 
 async function handleTokenRequest(request, env, corsHeaders) {
@@ -208,7 +154,7 @@ function buildCorsHeaders(accessOrigin) {
   const origin = accessOrigin || "*";
   return {
     "access-control-allow-origin": origin,
-    "access-control-allow-methods": "GET, OPTIONS",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
     "access-control-allow-headers": "authorization, content-type"
   };
 }
@@ -238,16 +184,6 @@ function jsonResponse(body, status, extraHeaders) {
 function toInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function resolveFrontendUrl(env) {
-  if (env.FRONTEND_TOKEN_URL) {
-    return env.FRONTEND_TOKEN_URL;
-  }
-  if (env.FRONTEND_URL) {
-    return new URL("token.html", env.FRONTEND_URL).toString();
-  }
-  return "";
 }
 
 function extractSession(request) {
@@ -326,6 +262,38 @@ function base32Encode(bytes) {
   return output;
 }
 
+async function derivePassword(password, salt, iterations) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      hash: "SHA-256",
+      salt,
+      iterations
+    },
+    key,
+    256
+  );
+
+  return new Uint8Array(bits);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
 function timingSafeEqual(a, b) {
   if (a.length !== b.length) {
     return false;
@@ -337,67 +305,15 @@ function timingSafeEqual(a, b) {
   return diff === 0;
 }
 
-async function fetchGitHubUser(accessToken) {
-  const response = await fetch(`${GITHUB_API_BASE}/user`, {
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      accept: "application/vnd.github+json",
-      "user-agent": "stormed-hub"
-    }
-  });
-
-  if (!response.ok) {
-    return null;
-  }
-
-  return response.json();
-}
-
-async function fetchOrgMembership(accessToken, org) {
-  const response = await fetch(
-    `${GITHUB_API_BASE}/user/memberships/orgs/${encodeURIComponent(org)}`,
-    {
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        accept: "application/vnd.github+json",
-        "user-agent": "stormed-hub"
-      }
-    }
-  );
-
-  if (!response.ok) {
-    return null;
-  }
-
-  return response.json();
-}
-
-async function makeState(secret) {
-  const nonce = new Uint8Array(16);
-  crypto.getRandomValues(nonce);
-  const issued = Math.floor(Date.now() / 1000);
-  const payload = `${issued}.${base64UrlFromBytes(nonce)}`;
-  const sig = await hmacBase64Url(secret, payload);
-  return `${payload}.${sig}`;
-}
-
-async function verifyState(state, secret) {
-  const parts = state.split(".");
-  if (parts.length !== 3) {
+function timingSafeEqualBytes(a, b) {
+  if (a.length !== b.length) {
     return false;
   }
-  const issued = Number.parseInt(parts[0], 10);
-  if (!Number.isFinite(issued)) {
-    return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a[i] ^ b[i];
   }
-  const payload = `${parts[0]}.${parts[1]}`;
-  const sig = parts[2];
-  const expected = await hmacBase64Url(secret, payload);
-  if (!timingSafeEqual(sig, expected)) {
-    return false;
-  }
-  const now = Math.floor(Date.now() / 1000);
-  return now - issued <= 300;
+  return diff === 0;
 }
 
 async function signSession(secret, payload) {
