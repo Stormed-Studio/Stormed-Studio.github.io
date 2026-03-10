@@ -51,20 +51,10 @@ body {
 }
 
 .brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
   font-size: 0.85rem;
   text-transform: uppercase;
   letter-spacing: 0.28em;
   color: var(--muted);
-}
-
-.brand-logo {
-  width: 40px;
-  height: 40px;
-  object-fit: contain;
-  filter: drop-shadow(0 0 12px rgba(125, 211, 255, 0.45));
 }
 
 .tag {
@@ -203,6 +193,39 @@ h1 {
 
 .gsi {
   margin: 18px 0 24px;
+}
+
+.auth-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.auth-button {
+  appearance: none;
+  border: 1px solid rgba(125, 211, 255, 0.4);
+  background: rgba(125, 211, 255, 0.1);
+  color: var(--text);
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.auth-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(125, 211, 255, 0.7);
+}
+
+.auth-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.auth-button.ghost {
+  background: transparent;
 }
 
 .token-box {

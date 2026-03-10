@@ -4,14 +4,23 @@ const CONFIG = {
 };
 
 const button = document.getElementById("gsi-button");
+const loginButton = document.getElementById("login-button");
+const logoutButton = document.getElementById("logout-button");
 const tokenValue = document.getElementById("token-value");
 const tokenMeta = document.getElementById("token-meta");
 
 let idToken = "";
 let refreshTimer = null;
+let signedIn = false;
 
 function setMeta(text) {
   tokenMeta.textContent = text;
+}
+
+function setSignedIn(state) {
+  signedIn = state;
+  loginButton.hidden = state;
+  logoutButton.hidden = !state;
 }
 
 function scheduleRefresh(expiresIn) {
@@ -55,17 +64,43 @@ async function fetchToken() {
 
 function handleCredentialResponse(response) {
   idToken = response.credential;
+  setSignedIn(true);
   fetchToken();
 }
 
+function handleLogout() {
+  idToken = "";
+  setSignedIn(false);
+  tokenValue.textContent = "Sign in to view";
+  setMeta("Signed out.");
+
+  if (window.google?.accounts?.id?.disableAutoSelect) {
+    google.accounts.id.disableAutoSelect();
+  }
+}
+
+function handleLogin() {
+  if (window.google?.accounts?.id?.prompt) {
+    google.accounts.id.prompt();
+  } else {
+    setMeta("Google sign-in is not ready.");
+  }
+}
+
 function initGoogle() {
+  setSignedIn(false);
+  loginButton.addEventListener("click", handleLogin);
+  logoutButton.addEventListener("click", handleLogout);
+
   if (CONFIG.clientId.includes("YOUR_")) {
     setMeta("Set your Google Client ID in token.js");
+    loginButton.disabled = true;
     return;
   }
 
   if (CONFIG.tokenEndpoint.includes("your-worker")) {
     setMeta("Set your token endpoint in token.js");
+    loginButton.disabled = true;
     return;
   }
 

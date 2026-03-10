@@ -18,14 +18,7 @@
 
     <main class="page token-page">
       <nav class="nav">
-        <div class="brand">
-          <img
-            class="brand-logo"
-            src="images/StormedGroup.png"
-            alt="Stormed Hub logo"
-          />
-          <span>STORMED HUB</span>
-        </div>
+        <div class="brand">STORMED HUB</div>
         <div class="tag">Token Access</div>
       </nav>
 
@@ -33,6 +26,12 @@
         <div class="panel-title">Authorized Accounts</div>
         <p class="panel-copy">Sign in with Google to view the current token.</p>
 
+        <div class="auth-row">
+          <button id="login-button" class="auth-button">Sign in with Google</button>
+          <button id="logout-button" class="auth-button ghost" hidden>
+            Log out
+          </button>
+        </div>
         <div id="gsi-button" class="gsi"></div>
 
         <div class="token-box">
