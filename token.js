@@ -1,6 +1,6 @@
 const CONFIG = {
-  loginEndpoint: "https://your-worker.example/auth/login",
-  tokenEndpoint: "https://your-worker.example/token"
+  loginEndpoint: "https://stormed-hub.yfydgf477.workers.dev/auth/login",
+  tokenEndpoint: "https://stormed-hub.yfydgf477.workers.dev/token"
 };
 
 const form = document.getElementById("auth-form");
@@ -40,6 +40,25 @@ function setSession(session) {
 
 function clearSession() {
   sessionStorage.removeItem("stormed_session");
+}
+
+function validateConfig() {
+  const issues = [];
+  if (CONFIG.loginEndpoint.includes("your-worker")) {
+    issues.push("login endpoint");
+  }
+  if (CONFIG.tokenEndpoint.includes("your-worker")) {
+    issues.push("token endpoint");
+  }
+
+  if (issues.length) {
+    loginButton.disabled = true;
+    setMeta(`Set ${issues.join(" and ")} in token.js`);
+    return false;
+  }
+
+  loginButton.disabled = false;
+  return true;
 }
 
 function scheduleRefresh(expiresIn) {
@@ -90,8 +109,7 @@ async function fetchToken() {
 async function handleLogin(event) {
   event.preventDefault();
 
-  if (CONFIG.loginEndpoint.includes("your-worker")) {
-    setMeta("Set your login endpoint in token.js");
+  if (!validateConfig()) {
     return;
   }
 
@@ -150,9 +168,7 @@ function init() {
   form.addEventListener("submit", handleLogin);
   logoutButton.addEventListener("click", handleLogout);
 
-  if (CONFIG.tokenEndpoint.includes("your-worker")) {
-    setMeta("Set your token endpoint in token.js");
-  }
+  validateConfig();
 
   fetchToken();
 }
