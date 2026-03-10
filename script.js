@@ -10,8 +10,8 @@ const settings = {
   speedScale: prefersReducedMotion ? 0.35 : 1,
   minRadius: 0.8,
   maxRadius: 2.2,
-  minLife: 6,
-  maxLife: 14
+  minLife: 12,
+  maxLife: 26
 };
 
 let width = 0;
@@ -28,7 +28,7 @@ function makeParticle(randomY) {
     x: rand(0, width),
     y: randomY ? rand(0, height) : rand(-height * 0.2, 0),
     r: rand(settings.minRadius, settings.maxRadius),
-    speed: rand(14, 40) * settings.speedScale,
+    speed: rand(8, 26) * settings.speedScale,
     drift: rand(-12, 12) * settings.speedScale,
     sway: rand(6, 18),
     swaySpeed: rand(0.6, 1.6),

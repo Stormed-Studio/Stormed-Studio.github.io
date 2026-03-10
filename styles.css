@@ -98,6 +98,11 @@ h1 {
   max-width: 52ch;
 }
 
+.note {
+  font-size: 1rem;
+  color: var(--muted);
+}
+
 .pill {
   display: inline-flex;
   align-items: center;

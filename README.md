@@ -1,2 +1,5 @@
 # Stormed-Studio.github.io
-Website / Yezzirski
+STORMED HUB landing page.
+
+## Key system
+Backend lives in `backend/` (Cloudflare Worker).
