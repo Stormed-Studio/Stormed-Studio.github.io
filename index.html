@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stormed Script Vault</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <canvas id="snow" aria-hidden="true"></canvas>
+
+    <main class="page">
+      <nav class="nav">
+        <div class="brand">Stormed Vault</div>
+        <div class="tag">Private Access</div>
+      </nav>
+
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Roblox Script Storage</p>
+          <h1>Private scripts. Time locked access.</h1>
+          <p class="lead">
+            A minimal, locked vault for testing scripts with rotating keys and
+            private delivery. Built for trusted members only.
+          </p>
+          <div class="pill"><span></span> Status: Locked</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Access Gate</div>
+          <p class="panel-copy">
+            This vault never shows the key on the website. The access token
+            rotates every minute and is verified by the backend.
+          </p>
+          <div class="panel-row">
+            <span>Key rotation</span>
+            <span class="panel-value">60s</span>
+          </div>
+          <div class="panel-row">
+            <span>Visibility</span>
+            <span class="panel-value">Hidden</span>
+          </div>
+          <div class="panel-row">
+            <span>Script</span>
+            <span class="panel-value">Locked</span>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        Stormed Studio. Script vault landing page.
+      </footer>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
